@@ -1,0 +1,18 @@
+{
+  "name": "eodhd-screener",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Filter and rank stocks across exchanges by market cap, P/E, dividend yield, sector and more — on your own EODHD key.",
+  "scripts": {
+    "build": "node build.js",
+    "start": "node build.js && node server/proxy.js",
+    "test": "node --test --require ./test/jest-compat.js test/proxy.test.js test/proxy-hardening.test.js test/proxy-morningstar.test.js test/proxy-compression.test.js test/proxy-timeout.test.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
