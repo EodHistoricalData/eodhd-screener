@@ -1571,7 +1571,9 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
                       minWidth: 120,
                       ariaLabel: 'Sort results by',
                     })}
-                    <button
+                    {/* This row's two buttons are drawn 22-23 px tall: each
+                        gets an invisible 24 px hit area (data-hit). */}
+                    <button data-hit=""
                       onClick={() => { setClientSort({ ...clientSort, order: clientSort.order === 'desc' ? 'asc' : 'desc' }); setCurrentPage(1); }}
                       title={clientSort.order === 'desc' ? 'Descending — click for ascending' : 'Ascending — click for descending'}
                       style={{
@@ -1582,7 +1584,7 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
                       }}>
                       {clientSort.order === 'desc' ? '\u2193' : '\u2191'}
                     </button>
-                    <button
+                    <button data-hit=""
                       onClick={() => {
                         setResults(null); setError(null);
                         setFilters(defaultFilters);
