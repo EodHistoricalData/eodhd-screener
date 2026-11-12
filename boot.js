@@ -7,7 +7,7 @@ window.APP_META = {
   "repo": "eodhd-screener",
   "title": "EODHD Screener",
   "description": "Filter and rank stocks across exchanges by market cap, P/E, dividend yield, sector and more — on your own EODHD key.",
-  "keyNote": "Needs a paid plan: the Screener API is not on the free tier. On a free key the app opens and tells you exactly that.",
+  "keyNote": "The Screener API is not on the free tier: it comes with All-In-One and EOD+Intraday All World Extended. On a free key the app opens and tells you exactly that.",
   "storage": [
     "eodhd_saved_screens",
     "eodhd_screener_session"

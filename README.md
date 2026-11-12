@@ -15,7 +15,7 @@ npm start                 # http://localhost:5173
 ```
 
 Put your EODHD API key in `.env` — [get one here](https://eodhd.com/register?utm_source=eodhd_oss&utm_medium=app&utm_campaign=screener&utm_content=readme).
-Needs a paid plan: the Screener API is not on the free tier. On a free key the app opens and tells you exactly that. There is no demo mode: without a key the app tells you so
+The Screener API is not on the free tier: it comes with All-In-One and EOD+Intraday All World Extended. On a free key the app opens and tells you exactly that. There is no demo mode: without a key the app tells you so
 and does nothing else.
 
 Tested in current Chrome and Firefox on Node 20 and 24. Other browsers
@@ -43,7 +43,7 @@ through the screens you visited.
 
 ## What it needs from your plan
 
-The screener is a paid EODHD endpoint — the free tier answers 403 on it. Everything the app needs is that one endpoint, so without it there is nothing else to fall back on.
+The screener is a paid EODHD endpoint (All-In-One and EOD+Intraday All World Extended include it); the free plan answers 403 on it. Everything the app needs is that one endpoint, so without it there is nothing else to fall back on.
 
 When a request comes back `403`, the app shows you EODHD's own explanation of
 what is missing rather than a generic error.
