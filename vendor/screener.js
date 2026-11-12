@@ -100,6 +100,13 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
 
   const [filters, setFilters] = React.useState(restored?.filters || defaultFilters);
 
+  const screenLimit = (window.FreeLimitWalls ? window.FreeLimitWalls.useItem : () => null)('screener_filters');
+  const [limitRefusal, setLimitRefusal] = React.useState(null);
+  const limitShownItem = React.useRef(null);
+  const screenLimitNow = React.useRef(screenLimit);
+  React.useEffect(() => { screenLimitNow.current = screenLimit; }, [screenLimit]);
+  const wallSeq = React.useRef(0);
+
   // Persist screener state between navigations (asset detail and back)
   React.useEffect(() => {
     try {
@@ -111,7 +118,8 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
 
   const C3 = window.C3;
   const isDark = theme === 'dark';
-  const isDemo = window.APP_PLATFORM === 'WEB' ? false : window.EODHD_API.isDemo(apiKey);
+  const isDemo = window.APP_PLATFORM === 'WEB' ? false
+    : window.EODHD_API.isDemo(apiKey) && !(window.FreeLimitWalls && window.FreeLimitWalls.replacesDemoCap('screener_filters', screenLimit));
 
   // Deep link: #/screener?exchange=NYSE&minMarketCap=…  (see screenerDeepLink.js).
   // Consumed once on mount — the parser strips the query from the URL — so Back,
@@ -448,8 +456,69 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
   const RLW = window.RateLimitWait;
   const rlWait = RLW.useWait();
   const lastRunRef = React.useRef(undefined);
+  const screenWall = (screen) => {
+    const FL = window.FreeLimits;
+    const W = window.FreeLimitWalls;
+    if (!FL || !W) return null;
+    const used = W.screenerFilterCount(screen, presetScreens);
+    if (FL.check('screener_filters', used) !== 'wall') return null;
+    const seq = ++wallSeq.current;
+    return FL.confirmWall('screener_filters', used).then((it) => {
+      if (seq !== wallSeq.current) return true;
+      if (!it) return false;
+      const card = W.screenerRefusal(used);
+      if (!card) return false;
+      limitShownItem.current = { mode: it.mode, max: it.max };
+      goToResultsRef.current = false;
+      setLimitRefusal(card);
+      setShowFilters(true);
+      window.Haptics?.error?.();
+      return true;
+    }, () => false);
+  };
+  const showServerLimit = (refusal, screen) => {
+    const W = window.FreeLimitWalls;
+    if (!W || !refusal || refusal.reason !== 'free_limit' || refusal.capability !== 'screener_filters') return false;
+    const lim = refusal.limit || {};
+    const used = Number.isFinite(lim.used) ? lim.used : W.screenerFilterCount(screen, presetScreens);
+    const card = W.screenerRefusal(used, { max: lim.max, plan: refusal.plan, upgrade_url: refusal.upgrade_url });
+    if (!card) return false;
+    limitShownItem.current = { server: screenLimitNow.current };
+    setLimitRefusal(card);
+    setShowFilters(true);
+    return true;
+  };
+  React.useEffect(() => {
+    if (!limitRefusal) return;
+    const W = window.FreeLimitWalls;
+    const max = limitRefusal.limit && Number.isFinite(limitRefusal.limit.max) ? limitRefusal.limit.max : null;
+    const then = limitShownItem.current;
+    const fromServer = !!then && 'server' in then;
+    const judged = fromServer ? screenLimit !== then.server : !!then;
+    const shownMax = fromServer ? max : (then ? then.max : null);
+    const eased = judged && (!screenLimit || screenLimit.mode !== 'enforce'
+      || (Number.isFinite(screenLimit.max) && Number.isFinite(shownMax) && screenLimit.max > shownMax));
+    if (!W || max === null || eased || W.screenerFilterCount(filters, presetScreens) <= max) setLimitRefusal(null);
+  }, [filters, screenLimit, limitRefusal]);
+  React.useEffect(() => {
+    if (!limitRefusal) return;
+    const el = document.querySelector('[data-screener-limit-card]');
+    if (!el || !el.scrollIntoView) return;
+    try { el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) { el.scrollIntoView(); }
+  }, [limitRefusal]);
   const loadScreenerData = async (overrideFilters) => {
     if (isDemo) return;
+    const W = window.FreeLimitWalls;
+    const keyless = window.APP_PLATFORM !== 'WEB' && window.EODHD_API.isDemo(apiKey);
+    if (keyless) {
+      const yields = W ? W.demoCapYieldsNow('screener_filters') : false;
+      if (yields !== true && !(yields && await yields)) return;
+    }
+    const walled = screenWall(overrideFilters || filters);
+    if (walled && await walled) return;
+    if (walled && keyless && !(W && W.replacesDemoCap('screener_filters'))) return;
+    ++wallSeq.current;
+    setLimitRefusal(null);
     lastRunRef.current = overrideFilters;
     setRefused(false);
     setRunFail(null);
@@ -628,6 +697,11 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
       if (window.MIAnalytics) window.MIAnalytics.track('dl_mi_screener_filter', { result_count: resultData.length, exchange: (overrideFilters || filters).exchange });
     } catch (err) {
       if (stale()) return;
+      if (err && err.planRequired && showServerLimit(err.planRequired, overrideFilters || filters)) {
+        setLoadProgress(null);
+        setLoading(false);
+        return;
+      }
       // A request that did not come back -- the limit, EODHD's own error, no
       // connection -- is said with its reason and a Try again; at 429 it read
       // "HTTP 429 (screener)" with no wait and no button.
@@ -724,8 +798,12 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
     if (!aiQuery.trim() || aiLoading) return;
     setAiLoading(true); setAiError(null); setAiDescription(null); setResults(null);
     window.Haptics?.medium();
+    const capW = window.FreeLimitWalls;
+    const cap = screenLimit && screenLimit.mode === 'enforce' && Number.isFinite(screenLimit.max) && capW ? screenLimit.max : null;
     try {
-      const result = await window.AIService.parseScreenerQuery(aiQuery.trim());
+      const result = cap === null
+        ? await window.AIService.parseScreenerQuery(aiQuery.trim())
+        : await window.AIService.parseScreenerQuery(aiQuery.trim(), { maxFilters: cap });
       // Start from a CLEAN filter set (not defaultFilters with its 10B min-cap),
       // so the AI query gets exactly what the model decided on. Without this,
       // 'high volume' was silently intersected with 'market cap > $10B' and
@@ -746,11 +824,15 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
       // (ScreenerRules.validateAiFilters); the rest is named, not sent.
       const checked = window.ScreenerRules.validateAiFilters(result && result.filters);
       Object.keys(checked.filters).forEach(k => { aiFilters[k] = checked.filters[k]; });
+      const capped = cap === null ? null : capW.capScreenerFilters(aiFilters, cap);
+      if (capped) Object.assign(aiFilters, capped.filters);
       setFilters(aiFilters);
       setActivePreset(null);
-      setAiDescription(checked.dropped.length
+      const said = checked.dropped.length
         ? `${result.description || ''}${result.description ? ' ' : ''}(Ignored what the screener cannot use: ${checked.dropped.join(', ')}.)`
-        : result.description);
+        : result.description;
+      const capNote = null; // standalone: nothing caps the answer (shell/shims.js)
+      setAiDescription(capNote ? `${said ? said + ' ' : ''}${capNote}` : said);
       await loadScreenerData(aiFilters);
       window.Haptics?.success();
     } catch (err) {
@@ -1071,6 +1153,13 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
                   </button>
                 ))}
               </div>
+              {}
+              {(() => {
+                const note = screenLimit && window.FreeLimitWalls ? window.FreeLimitWalls.screenerAiNote(screenLimit) : null;
+                return note ? (
+                  <p data-free-limit-note="screener_filters" style={{ fontSize: '12px', margin: '10px 0 0', color: isDark ? C3.textMutedDark : C3.textMutedLight }}>{note}</p>
+                ) : null;
+              })()}
               {aiError && (
                 <div style={{
                   marginTop: '10px', padding: '10px 12px', borderRadius: '10px',
@@ -1203,6 +1292,13 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
               </div>
             )}
 
+            {}
+            {limitRefusal && window.PlanNotice && window.PlanNotice.RefusalCard ? (
+              // Brought into view clear of the sticky bar above it, as the panel is.
+              <div data-screener-limit-card="true" style={{ scrollMarginTop: '72px' }}>
+                {React.createElement(window.PlanNotice.RefusalCard, { refusal: limitRefusal, isDark })}
+              </div>
+            ) : null}
             {/* Filters Panel */}
             {/* The fields set outline: none inline and had no other sign of
                 focus where the host draws no ring of its own (the open app):
@@ -1218,7 +1314,18 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
                   {/* h3: it follows the Quick Screens h2, so no level is skipped. */}
-                  <h3 tabIndex={-1} style={{ fontWeight: '600', margin: 0 }}>Filters</h3>
+                  {(() => {
+                    const heading = <h3 tabIndex={-1} style={{ fontWeight: '600', margin: 0 }}>Filters</h3>;
+                    const count = screenLimit && window.FreeLimitWalls
+                      ? window.FreeLimitWalls.screenerCounter(filters, presetScreens, screenLimit) : null;
+                    if (!count) return heading;
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0, flexWrap: 'wrap' }}>
+                        {heading}
+                        <span data-free-limit-counter="screener_filters" style={{ fontSize: 12, color: isDark ? C3.textMutedDark : C3.textMutedLight }}>{count}</span>
+                      </div>
+                    );
+                  })()}
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button
                       onClick={() => setShowSaveModal(true)}
