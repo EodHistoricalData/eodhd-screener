@@ -11,7 +11,8 @@ window.APP_META = {
   "storage": [
     "eodhd_saved_screens",
     "eodhd_screener_session"
-  ]
+  ],
+  "ownFailures": []
 };
 
 if (!window.React || !window.ReactDOM) {
