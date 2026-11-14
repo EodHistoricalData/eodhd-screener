@@ -12,7 +12,8 @@ window.APP_META = {
     "eodhd_saved_screens",
     "eodhd_screener_session"
   ],
-  "ownFailures": []
+  "ownFailures": [],
+  "ownLines": {}
 };
 
 if (!window.React || !window.ReactDOM) {
