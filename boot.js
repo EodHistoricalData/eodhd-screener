@@ -12,8 +12,7 @@ window.APP_META = {
     "eodhd_saved_screens",
     "eodhd_screener_session"
   ],
-  "ownFailures": [],
-  "ownLines": {}
+  "lineKinds": []
 };
 
 if (!window.React || !window.ReactDOM) {

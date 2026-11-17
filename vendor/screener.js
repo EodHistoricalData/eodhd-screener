@@ -1560,7 +1560,7 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
                 {/* The reason is read when it appears, a rejected filter's
                     too; the held press's note counts every second and is
                     outside the live region. */}
-                <p style={{ color: C3.error, fontSize: '14px', margin: 0 }}><span role="status">{error}</span>{rlWait.note ? <span data-wait-note="true">{' ' + rlWait.note}</span> : null}</p>
+                <p data-own-fail={runFail ? 'screener' : undefined} style={{ color: C3.error, fontSize: '14px', margin: 0 }}><span role="status">{error}</span>{rlWait.note ? <span data-wait-note="true">{' ' + rlWait.note}</span> : null}</p>
                 {/* Not served: Try again, counting the limit's wait down and
                     sending nothing inside it. */}
                 {runFail && !loading && (
@@ -1918,14 +1918,16 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
               <div style={{ textAlign: 'center', padding: '32px 20px' }}>
                 {/* The words are the live region; the button and the note
                     count every second and stay outside it. */}
-                <p role="status" style={{ color: isDark ? C3.textMutedDark : C3.textMutedLight, marginBottom: '16px' }}>
-                  Nothing below is missing data — the request was not served. See the panel above.
+                {/* What did not load, pointing to the panel: "Nothing below is
+                    missing data" is the panel's sentence. */}
+                <p role="status" data-own-fail="screener" data-see-panel="true" style={{ color: isDark ? C3.textMutedDark : C3.textMutedLight, marginBottom: '16px' }}>
+                  {RLW.panelLine('The screener results')}
                 </p>
                 <RLW.RetryButton wait={rlWait} isDark={isDark} data-retry-focus="true" onClick={() => { retryFocusRef.current = true; loadScreenerData(lastRunRef.current); }} style={{
                   padding: '12px 24px', background: C3.logoGradient, border: 'none',
                   borderRadius: '12px', color: 'white', fontSize: '14px', fontWeight: '600', cursor: 'pointer',
                 }} />
-                {rlWait.note && <p data-wait-note="true" style={{ margin: '12px 0 0', fontSize: 13, color: isDark ? C3.textDark : C3.textLightTheme }}>{rlWait.note}</p>}
+                {rlWait.note && <p data-wait-note="true" data-own-fail="screener" style={{ margin: '12px 0 0', fontSize: 13, color: isDark ? C3.textDark : C3.textLightTheme }}>{rlWait.note}</p>}
               </div>
             )}
 
