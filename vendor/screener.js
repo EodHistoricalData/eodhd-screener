@@ -453,8 +453,13 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
   // The last run did not come back (RateLimitWait.failure): its line has a
   // Try again counting the limit's wait down. Null for anything else.
   const [runFail, setRunFail] = React.useState(null);
+  // The failure the panel was explaining, for the line under it to name
+  // itself once the panel has gone (RateLimitWait.panelUp).
+  const [refusedFail, setRefusedFail] = React.useState(null);
   const RLW = window.RateLimitWait;
   const rlWait = RLW.useWait();
+  // Drawn again when a host's panel comes or goes.
+  RLW.useHostPanel();
   const lastRunRef = React.useRef(undefined);
   const screenWall = (screen) => {
     const FL = window.FreeLimits;
@@ -506,7 +511,7 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
     if (!el || !el.scrollIntoView) return;
     try { el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) { el.scrollIntoView(); }
   }, [limitRefusal]);
-  const loadScreenerData = async (overrideFilters) => {
+  const loadScreenerData = async (overrideFilters, opts) => {
     if (isDemo) return;
     const W = window.FreeLimitWalls;
     const keyless = window.APP_PLATFORM !== 'WEB' && window.EODHD_API.isDemo(apiKey);
@@ -697,6 +702,11 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
       if (window.MIAnalytics) window.MIAnalytics.track('dl_mi_screener_filter', { result_count: resultData.length, exchange: (overrideFilters || filters).exchange });
     } catch (err) {
       if (stale()) return;
+      if (err && err.planRequired && opts && opts.onServerLimit && opts.onServerLimit(err.planRequired)) {
+        setLoadProgress(null);
+        setLoading(false);
+        return;
+      }
       if (err && err.planRequired && showServerLimit(err.planRequired, overrideFilters || filters)) {
         setLoadProgress(null);
         setLoading(false);
@@ -719,6 +729,7 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
       }
       if (notServed) err = { message: window.RateLimitWait.failText('The screen', f) };
       setRefused(Boolean(window.Entitlement && window.Entitlement.explained && window.Entitlement.explained()));
+      setRefusedFail(f);
       setError(window.Entitlement && window.Entitlement.explained() ? '' : (err.message || 'Failed to load screener data'));
     }
     if (stale()) return;
@@ -799,11 +810,22 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
     setAiLoading(true); setAiError(null); setAiDescription(null); setResults(null);
     window.Haptics?.medium();
     const capW = window.FreeLimitWalls;
-    const cap = screenLimit && screenLimit.mode === 'enforce' && Number.isFinite(screenLimit.max) && capW ? screenLimit.max : null;
+    const FL = window.FreeLimits;
+    const capNow = () => {
+      const it = FL && FL.item ? FL.item('screener_filters') : null;
+      return it && it.mode === 'enforce' && Number.isFinite(it.max) && capW ? it.max : null;
+    };
+    // At most this long after the model's answer; past it the server's
+    // refusal tells.
+    const AI_LIMITS_WAIT_MS = 4000;
+    const known = FL && FL.whenKnown ? FL.whenKnown(AI_LIMITS_WAIT_MS) : Promise.resolve(true);
+    const askCap = capNow();
     try {
-      const result = cap === null
+      const result = askCap === null
         ? await window.AIService.parseScreenerQuery(aiQuery.trim())
-        : await window.AIService.parseScreenerQuery(aiQuery.trim(), { maxFilters: cap });
+        : await window.AIService.parseScreenerQuery(aiQuery.trim(), { maxFilters: askCap });
+      await known;
+      const cap = capNow();
       // Start from a CLEAN filter set (not defaultFilters with its 10B min-cap),
       // so the AI query gets exactly what the model decided on. Without this,
       // 'high volume' was silently intersected with 'market cap > $10B' and
@@ -831,9 +853,28 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
       const said = checked.dropped.length
         ? `${result.description || ''}${result.description ? ' ' : ''}(Ignored what the screener cannot use: ${checked.dropped.join(', ')}.)`
         : result.description;
-      const capNote = null; // standalone: nothing caps the answer (shell/shims.js)
-      setAiDescription(capNote ? `${said ? said + ' ' : ''}${capNote}` : said);
-      await loadScreenerData(aiFilters);
+      const describe = (n, dropped) => {
+        const capNote = null; // standalone: nothing caps the answer (shell/shims.js)
+        return capNote ? `${said ? said + ' ' : ''}${capNote}` : said;
+      };
+      setAiDescription(describe(cap, capped ? capped.dropped : []));
+      let serverMax = null;
+      await loadScreenerData(aiFilters, {
+        onServerLimit: (refusal) => {
+          const max = refusal && refusal.reason === 'free_limit' && refusal.capability === 'screener_filters'
+            && refusal.limit && Number.isFinite(refusal.limit.max) ? refusal.limit.max : null;
+          if (max === null || !capW || !capW.capScreenerFilters(aiFilters, max).dropped.length) return false;
+          serverMax = max;
+          return true;
+        },
+      });
+      if (serverMax !== null) {
+        const again = capW.capScreenerFilters(aiFilters, serverMax);
+        Object.assign(aiFilters, again.filters);
+        setFilters({ ...aiFilters });
+        setAiDescription(describe(serverMax, (capped ? capped.dropped : []).concat(again.dropped)));
+        await loadScreenerData(aiFilters);
+      }
       window.Haptics?.success();
     } catch (err) {
       if (err.message === 'AI_TOKENS_REQUIRED') { setAiLoading(false); return; }
@@ -1920,8 +1961,10 @@ window.ScreenerView = ({ apiKey, onSelectAsset, onUpgradeClick, onBack, theme, a
                     count every second and stay outside it. */}
                 {/* What did not load, pointing to the panel: "Nothing below is
                     missing data" is the panel's sentence. */}
-                <p role="status" data-own-fail="screener" data-see-panel="true" style={{ color: isDark ? C3.textMutedDark : C3.textMutedLight, marginBottom: '16px' }}>
-                  {RLW.panelLine('The screener results')}
+                {/* Only while the panel is up: once it has gone the line
+                    names the reason itself. */}
+                <p role="status" data-own-fail="screener" data-see-panel={RLW.panelUp() ? 'true' : undefined} style={{ color: isDark ? C3.textMutedDark : C3.textMutedLight, marginBottom: '16px' }}>
+                  {RLW.panelUp() ? RLW.panelLine('The screener results') : RLW.failText('The screener results', refusedFail)}
                 </p>
                 <RLW.RetryButton wait={rlWait} isDark={isDark} data-retry-focus="true" onClick={() => { retryFocusRef.current = true; loadScreenerData(lastRunRef.current); }} style={{
                   padding: '12px 24px', background: C3.logoGradient, border: 'none',
